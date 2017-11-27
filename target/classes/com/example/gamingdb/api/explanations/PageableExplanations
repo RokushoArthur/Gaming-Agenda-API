@@ -1,0 +1,67 @@
+É possível criar uma paginação para sua API, ou seja, mostrar itens por páginas. Para fazer isso,
+é necessário alterar em GameResource o seguinte: 
+
+	@GetMapping
+	public Page<Game> searchByFilter(GameFilter gameFilter, Pageable pageable) {
+		return gameRepository.filter(gameFilter, pageable);
+	}
+	
+O atributo pageable serve para receber os parâmetros de número de páginas e quantidade de itens na
+página. O retorno se torna Page pois ele precisa retornar a página atual, quantos registros estão
+sendo mostrados na página. Será necessário alterar o GameRepositoryQuery para ficar da seguinte forma:
+
+	public interface GameRepositoryQuery {
+	
+		public Page<Game> filter(GameFilter gameFilter, Pageable pageable);
+		
+	}
+
+Outra classe que deve ser alterada, obviamente, é o GameRepositoryImpl. Ela precisa comportar os novos
+parâmetros e o novo retorno:
+	
+	@Override
+	public Page<Game> filter(GameFilter gameFilter, Pageable pageable) {
+		CriteriaBuilder builder = manager.getCriteriaBuilder();
+		CriteriaQuery<Game> criteria = builder.createQuery(Game.class);
+		
+		Root<Game> root = criteria.from(Game.class);
+		
+		//create restrictions
+		Predicate[] predicates = createRestrictions(gameFilter, builder, root);
+		criteria.where(predicates);
+		
+		
+		TypedQuery<Game> query = manager.createQuery(criteria);
+		addPageRestrictions(query, pageable);
+		
+		return new PageImpl<>(query.getResultList(), pageable, total(gameFilter)); 
+	}
+	
+Dentro temos um novo método, o addPageRestrictions(query, pageable) que deve ser criado, e o retorno
+se torna um PageImpl<>(query.getResultList(queryResultList(), pageable, total(gameFilter)). O primeiro
+método adicionará restrições quanto ao número de itens por página, e o segundo retornará a página
+com seus itens:
+	
+	private void addPageRestrictions(TypedQuery<Game> query, Pageable pageable) {
+		int actualPage = pageable.getPageNumber();
+		int itemsPerPage = pageable.getPageSize();
+		int firstPageItem = actualPage * itemsPerPage;
+		
+		query.setFirstResult(firstPageItem);
+		query.setMaxResults(itemsPerPage);
+	}
+	
+	private Long total(GameFilter gameFilter) {
+		CriteriaBuilder builder = manager.getCriteriaBuilder();
+		CriteriaQuery<Long> criteria = builder.createQuery(Long.class);
+		Root<Game> root = criteria.from(Game.class);
+		
+		Predicate[] predicates = createRestrictions(gameFilter, builder, root);
+		criteria.where(predicates);
+		
+		criteria.select(builder.count(root));
+		
+		return manager.createQuery(criteria).getSingleResult();
+	}
+	
+Dentro do total, temos o select (dado pelo builder), o from (que é o criteria) e o where (sendo o root).

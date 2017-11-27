@@ -1,0 +1,239 @@
+As exceções são construídas pelo próprio framework, mas é possível alterar.
+No caso, a classe que irá trabalhar com exceções estende a classe
+ResponseEntityExceptionHandler. Essa classe deve ser estendida por conta de seus
+vários métodos úteis para se trabalhar com a captura das exceções, e possuir
+a anotação @ControllerAdvice, para que possa observar a aplciação por
+inteira.
+O código abaixo traz um exemplo disso: 
+	
+	@Override
+	protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex,
+			HttpHeaders headers, HttpStatus status, WebRequest request) {
+		return handleExceptionInternal(ex, "Invalid Message", headers, HttpStatus.BAD_REQUEST, request);
+	}
+	
+Nesse código, podemos capturar a exceção e tratá-la com o handleExceptionInternal, podendo
+mudar inclusive o corpo da mensagem, os readers, o tipo da mensagem, os request. No caso acima,
+ele voltará um Bad Request (alterado através do HttpStatus), com o corpo "Invalid Message".
+Dessa forma, ao testar a aplicação, aparecerá "Invalid Message" no lugar de um texto imenso
+de erro.
+
+Pode-se alterar também as mensagens através de um arquivo chamado "messages.properties" dentro do src/main/resources.
+Esse arquivo pode ser criado e deve ter esse exato nome.
+
+Dentro desse arquivo, o conteúdo pode ser da seguinte forma: 
+
+	invalid.message=Invalid message
+	
+Caso seja necessário acentos, é preciso que a letra acentuada seja em unicode.
+
+Para receber esse tratamento, é só adicionar uma varíavel na classe que puxará
+do MessageSource, uma classe do Spring, da seguinte forma: 
+
+	@Autowired
+	private MessageSource messageSource;
+	
+E outra dentro do método que trata o erro: 
+
+	String userMessage = messageSource.getMessage("invalid.message", null, LocaleContextHolder.getLocale());
+	
+Para essa variável, o primeiro parâmetro do método getMessage diz respeito ao 
+id declarado no arquivo message.properties (no caso "invalid.message"). Já o
+segundo é um parâmetro extra (que não estamos utilizando, por isso do null), e
+por último a localização em que o server executa (LocaleContextHolder.getLocale()
+puxa a localização em que a aplicação está rodando, seja no Brasil ou nos EUA).
+Dentro do método handleExceptionInternal, deve-se ajustar a mensagem para receber
+a String criada. Pode-se fazer também mensagens para o desenvolvedor. O código
+completo fica da seguinte forma: 
+
+	@Override
+	protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException ex,
+			HttpHeaders headers, HttpStatus status, WebRequest request) {
+		
+		String userMessage = messageSource.getMessage("invalid.message", null, LocaleContextHolder.getLocale());
+		String developerMessage = ex.getCause().toString();
+		
+		return handleExceptionInternal(ex, new Error(userMessage, developerMessage), headers, HttpStatus.BAD_REQUEST, request);
+	}
+	
+	public static class Error {
+		
+		private String userMessage;
+		private String developerMessage;
+		
+		public Error(String userMessage, String developerMessage) {
+			this.userMessage = userMessage;
+			this.developerMessage = developerMessage;
+		}
+
+		public String getUserMessage() {
+			return userMessage;
+		}
+
+		public void setUserMessage(String userMessage) {
+			this.userMessage = userMessage;
+		}
+
+		public String getDeveloperMessage() {
+			return developerMessage;
+		}
+
+		public void setDeveloperMessage(String developerMessage) {
+			this.developerMessage = developerMessage;
+		}
+	}
+	
+Basicamente, agora que temos uma mensagem para o desenvolvedor e outra para
+o usuário, podemos criar uma inner class para que ambas sejam passadas, assim
+fazendo a inner class Error, que recebe ambas as mensagens. Essa inner class então
+é chamada dentro do handleExceptionInternal, no lugar em que a mensagem deveria
+ocupar, fazendo com que ambas apareçam na tela em formato JSON. Caso isso se
+transforme em uma tela, será muito mais facil enviar ao desenvolvedor/usuário
+dessa forma.
+
+O método que trata a validação dos argumentos é o handleMethodArgumentNotValid.
+Esse método trata quaisquer exceções que possa acontecer caso o atributo tenha
+um formato inválido. Nesse caso, com esse método, o ideal é passar uma lista de
+erros para retornar, para verificar qual foi a causa do erro. Para fazer a lista,
+será necessário criar um método que gerará essa lista: 
+
+	private List<Error> createErrorList(BindingResult bindingResult) {
+		List<Error> errors = new ArrayList<>();
+		
+		for (FieldError fieldError : bindingResult.getFieldErrors()) {
+			String userMessage = messageSource.getMessage(fieldError, LocaleContextHolder.getLocale());
+			String developerMessage = fieldError.toString();
+			
+			errors.add(new Error(userMessage, developerMessage));
+		}
+		
+		return errors;
+	}
+	
+Esse método basicamente criará um array list de errors e para cada um deles, 
+ele pegará o contexto de cada elemento (através do fieldErrors) e adicionará à 
+inner class Error, criando um componente com a lista. 
+
+Pode-se também adicionar outro arquivo na aplicação para customizar as
+mensagens. Por exemplo, a mensagem "may not be null" pode ser traduzida
+para todos os atributos que não podem ser nulos. Para isso, é necessário
+criar um arquivo ValidationMessages.properties. Dentro desse arquivo, é
+necessário ter o seguinte: 
+
+	javax.validation.constraints.NotNull.message=It is necessary
+	
+Por hora, a aplicação receberá uma mensagem it is necessary quando apresentar
+um valor nulo. Mas se quisermos atribuir para cada atributo, é só adicionar o
+número do atributo, como se fosse um vetor:
+
+	javax.validation.constraints.NotNull.message={0} is necessary
+
+Nesse caso, o nome do game é necessário e caso esteja null, irá disparar
+o nome da variável antes do texto "is necessary". Mas como ele atribuirá
+o nome da variável no texto, podemos personalizar o que será exibido no
+messages.properties:
+
+ 	game.name=Name
+ 	
+ Desse jeito, o atributo name da classe Game será mostrado como Name. Qual
+ a diferença? Disso:
+ 
+ 	name is necessary
+ 	
+ Pra isso:
+ 
+ 	Name is necessary
+ 	
+ Se fosse um nome composto, como nameOfTheChar, teriamos que adicionar no
+ messages.properties da seguinte forma: game.nameOfTheChar=Name of the char,
+ então iria disso:
+ 	
+ 	nameOfTheChar is necessary
+ 	
+Pra isso:
+	
+	Name of the char is necessary
+	
+Pode-se também fazer com o tamanho: 
+
+	javax.validation.constraints.Size.message={0} must be between {min} and {max} in length
+	
+onde o min e o max serão pegos da propriedade marcada com o Size. Assim, a mensagem será
+como no exemplo a seguir:
+	
+	Name must be between 2 and 100 in length
+
+A definição de qual posição do vetor é cada coisa é decidida pela ordem
+das variáveis que estão com a anotação NotNull.
+
+O método, voltando ao exceptionhandler, que tratará o erro de argumentos será o seguinte:
+
+	@Override
+	protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException ex,
+			HttpHeaders headers, HttpStatus status, WebRequest request) {
+
+		List<Error> errorsList = createErrorList(ex.getBindingResult());
+		
+		return handleExceptionInternal(ex, errorsList, headers, HttpStatus.BAD_REQUEST, request);
+	}
+
+Enviando ao nosso método criado um getBindingResult() para acoplar os resultados na mensagem de erro. Na
+nossa classe criada, o Field Errors averigua os campos validados e caso haja erro, pegará das listas criadas
+anteriormente (as mensagens de forma bonita) para exibir.
+
+Ao criar um método que fará uma validação que não existe, pode-se adicionar os tipos de erro através da
+anotação @ExceptionHandler sendo que dentro dessa anotação podemos passar uma array de erros que queremos
+que nosso método capture: 
+
+	@ExceptionHandler({EmptyResultDataAccessException.class })
+	@ResponseStatus(HttpStatus.NOT_FOUND)
+	public void handleEmptyResultDataAccessException(RuntimeException ex) {
+		
+	}
+	
+Pode-se também incrementar a mensagem de erro para o usuário, colocando o famoso ResponseEntity como retorno:
+ 
+ 	@ExceptionHandler({EmptyResultDataAccessException.class })
+	public ResponseEntity<Object> handleEmptyResultDataAccessException(EmptyResultDataAccessException ex, WebRequest request) {
+		String userMessage = messageSource.getMessage("resource.notFound", null, LocaleContextHolder.getLocale());
+		String developerMessage = ex.toString();
+		
+		List<Error> errorsList = Arrays.asList(new Error(userMessage, developerMessage));
+		
+		return handleExceptionInternal(ex, errorsList, new HttpHeaders(), HttpStatus.NOT_FOUND, request);
+	}
+	
+Dessa forma, recebendo o erro como parâmetro, só temos que adicionar dentro de messages.properties, a variável resource.notFound 
+para que possamos construir uma mensagem personalizada para o usuário: 
+
+	resource.notFound=Resource not found
+	
+Dentro da mensagem do desenvolvedor, também foi removido o método getCause(). Isso se deve ao fato de que não estamos querendo
+capturar a causa da exceção (já temos a causa, é o EmptyResultDataAccessException), mas queremos passar a mensagem como string
+para o desenvolvedor de qualquer forma. Então, esse método getCause() deve ser removido.
+
+Adicionando a seguinte dependência ao pom.xml:
+
+	<!-- Dependência apache para pegar a causa do erro -->
+	<dependency>
+		<groupId>org.apache.commons</groupId>
+		<artifactId>commons-lang3</artifactId>
+		<version>3.4</version>
+	</dependency>
+	
+Pode-se ter acesso a uma bilioteca que contém um método para pegar detalhadamente a causa do erro emitida pelo servidor.
+Alterando um pouco a classe de GamingDBExceptionHandler, podemos criar um método para capturar erros do servidor referentes
+à integridade dos dados:
+
+	@ExceptionHandler({DataIntegrityViolationException.class})
+	public ResponseEntity<Object> handleDataIntegrityViolationException(DataIntegrityViolationException ex, WebRequest request){
+		String userMessage = messageSource.getMessage("recurso.operationNotPermitted", null, LocaleContextHolder.getLocale());
+
+		String developerMessage = ExceptionUtils.getRootCauseMessage(ex);
+		List<Error> erros = Arrays.asList(new Error(userMessage, developerMessage));
+		
+		return handleExceptionInternal(ex, erros, new HttpHeaders(), HttpStatus.BAD_REQUEST, request);
+	}
+	
+Dessa forma, o erro será exibido detalhadamente onde foi causado, ao invés de simplesmente exibir a mensagem padrão do java, mostrando
+também a variável que causou o erro.

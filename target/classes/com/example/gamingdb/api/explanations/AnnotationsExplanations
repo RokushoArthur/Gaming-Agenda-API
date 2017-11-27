@@ -1,0 +1,66 @@
+@GetMapping, @PostMapping, @DeleteMapping... - Mapeia os requests que vem do servidor para o método que possui a anotação em questão. Caso
+haja 2 métodos com a mesma anotação, a aplicação voltará com erro a menos que a anotação possua 2 URL's diferentes. Por ex:
+	@GetMapping("/categoria") e @GetMapping("/outro").
+	
+@RestController - Indica que a classe é um rest controller.
+
+@RequestMapping("/nomeDaUrl") - mapeia o controlador pra URL destinada, assim evitando um erro 404.
+
+@AutoWired - Encontra uma implementação para o atributo ou método em questão.
+
+@Id - faz com que o elemento marcado com essa annotation seja uma primary key.
+
+@GeneratedValue - gera automaticamente o valor. O que vai dentro dos parêntesis define a regra de geração de valores. Ex: 
+	@GeneratedValue(strategy = GenerationType.IDENTITY) 
+	private Long id; - faz com que o id seja um tipo identity, auto incremental, começando do 1
+
+@NotNull - não permite com que o registro seja gravado caso o elemento marcado com essa annotation esteja nulo.
+
+@RequestBody - entende que as propriedades passadas no web pertencem ao elemento que está sendo passado como parâmetro.
+
+@PathVariable - entende que a variável passada na URI que está sendo acessada corresponde à variável que identifica o objeto que será acessado. Ex:
+	@PathVariable Long id - indica que o id será pego da URI e acessado para que seja feita uma busca com esse instrumento.
+	
+@ResponseStatus(HttpStatus.<STATUS>) - mostra a resposta em HTTP do request que foi enviado. HttpStatus.CREATED, por exemplo, mostra que o conteúdo foi criado.
+
+@ControllerAdvice - um controlador que observa toda a app.
+
+@Valid - valida o que está sendo recebido. Ex: 
+	@Valid Game game - valida o objeto game sendo recebido, para que não haja erros.
+caso a validação não aconteça corretamente (algo null, ou inválido), a app solta um 400 Bad Request ao invés de um 500 server sided.
+
+@Size (min = x, max = y) - faz com que a propriedade não possa ser gravada sem ter um X mínimo de tamanho e um Y máximo.
+
+@Embeddable - A classe com essa anotação quer dizer que ela faz parte de outra classe que puxar com a anotação @Embedded, não precisando criar
+uma tabela nova, já que essa classe Embeddable faz parte porém está separada em código para melhor organização. Ex:
+	@Embeddable
+	public class StatusPoints {}
+
+@Embedded - Cria uma conexão com a classe que possui a anotação Embeddable. Ex: 
+	@Embedded
+	private StatusPoints statusPoints
+	
+@Column(name = "nome_da_coluna_no_db") - referencia o nome da variável com a coluna no db.
+
+@ManyToOne - descreve o tipo de relacionamento das tabelas.
+
+@JoinColumn(name = "nome_da_key") - atribui o atributo marcado com essa anotação à foreign key do DB. Ex:
+	@JoinColumn(name = pokemon_id")
+	private Pokemon pokemon  - referencia o id do pokémon no atributo pokemon dentro da classe de times.
+	
+@Enumerated - descreve a relação com os Enums. Existem 2 tipos:
+	@Enumerated(EnumType.ORDINAL) - salva no banco de dados o índice do Enum.
+	@Enumerated(EnumType.STRING) - salva o nome do Enum.
+Essa anotação tem um valor maior ao criar um select no banco de dados para ver o atributo em questao marcado com o @Enumerated.
+
+@JsonIgnore - faz com que a variável marcada não seja transformada em propriedade e serializada pelo Jackson
+
+@Transient - mesma coisa que o JsonIgnore, porém para o hibernate
+
+@DateTimeFormat - configura o formato da data. Ex:
+	@DateTimeFormat(pattern = "yyy-MM-dd")
+	
+@CrossOrigin - permite requisições de outros domínios para o método anotado. Existem alguns parâmetros que podem ser adicionados
+como: 
+	@CrossOrigin(maxAge = 10, origins = {"http://localhost:8000"}) - maxAge delimita o time entre cada requisição seguida, 
+																	origins delimita um vetor com todos os domínios, etc
