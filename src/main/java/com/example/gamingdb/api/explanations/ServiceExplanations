@@ -1,0 +1,50 @@
+Algumas regras de negócio não podem existir dentro do controle. Para
+resolver esse problema, cria-se uma classe do tipo Service com a annotation
+@Service, para indicar que é um serivço do Spring:
+
+	import org.springframework.beans.BeanUtils;
+	import org.springframework.beans.factory.annotation.Autowired;
+	import org.springframework.dao.EmptyResultDataAccessException;
+	import org.springframework.stereotype.Service;
+	
+	import com.example.gamingdb.api.model.Game;
+	import com.example.gamingdb.api.repository.GameRepository;
+	
+	@Service
+	public class GameService {
+	
+		@Autowired
+		private GameRepository gameRepository;
+		
+		public Game update(Long id, Game game) {
+			Game savedGame = gameRepository.findOne(id);
+			
+			if (savedGame == null) {
+				throw new EmptyResultDataAccessException(1);
+			}
+			
+			BeanUtils.copyProperties(game, savedGame, "id");
+			
+			return gameRepository.save(savedGame);
+		}
+	}
+
+O código então chama o GameRepository para chamar os métodos necessários e
+utiliza do BeanUtils para copiar as propriedades do game atualizado para o
+savedGame, que foi puxado através do findOne(id). Depois então ele retorna
+o método salvo gameRepository.save(savedGame), para que possa ser utilizado
+no controlador. Também possui uma verificação para caso o usuário tente
+atualizar um game que não existe. Dentro do controlador GameResource será
+necessário instanciar esse GameService da seguinte forma: 
+	
+	@Autowired
+	private GameService gameService;
+	
+E o código de update ficará da seguinte forma: 
+	
+	@PutMapping("/{id}")
+	public ResponseEntity<Game> updateGameById(@PathVariable Long id, @Valid @RequestBody Game game) {
+		Game savedGame = gameService.update(id, game);
+		
+		return ResponseEntity.ok(savedGame);
+	}

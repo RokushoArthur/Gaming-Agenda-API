@@ -1,0 +1,12 @@
+todo erro com 2.x.x é um sucesso: 
+	200 - OK
+	201 - CREATED
+	204 - NO CONTENT
+	
+todo erro que começa com 4.x.x é um erro do lado do cliente
+	400 - Bad Request (houve um erro de parâmetros do lado do cliente talvez?)
+	401 - Unauthorized
+	404 - Page Not Found (URL inválida tentando ser acessada)
+	
+todo erro que começa com 5.x.x é um erro do lado do servidor
+	500 - Internal Server Error (talvez o banco esteja fora do ar)

@@ -1,0 +1,215 @@
+Antes de explicar esse tipo de classe, existem 2 conceitos que necessitam estar
+claros para que o entendimento: URL e URI.
+
+A URL serve para mapear sua aplicação, ou seja, é através dela que você
+terá acesso à sua aplicação. Vamos entendê-la como um endereço.
+
+A URI serve para especificar o seu desejo dentro da aplicação, ou seja, se
+seu desejo for acessar um home, ou um produto em específico, etc.
+
+no caso:
+
+dragonball.wikia.com/wiki/Goku
+
+a URL, ou o endereço do site é o "dragonball.wikia.com/wiki/". Porém, queremos
+algo específico, queremos informações sobre o Goku. Então adicionaremos a URI
+"Goku" no fim do endereço para que sejamos direcionados para aquela página.
+
+As classes de Resource contém códigos para manipular os recursos no qual ela
+tem controle. Como elas servem como um controller, é comum de virem com a 
+annotation @RestController, para que quando a URI seja acionada, o redirecionamento
+para essas classes aconteça de forma automática.
+
+Dentro dela, temos alguns métodos como por exemplo: 
+
+	public List<Game> searchForGames();
+	public void saveGame(@RequestBody Game game, HttpServletResponse response);
+	
+Basicamente, como é uma classe de controle de entidades, o tratamento dos 
+dados é feito por ela antes de ser gravada no DB.
+
+Para pegar uma lista, pode-se simplesmente utilizar do seguinte código:
+	
+	@GetMapping
+	public List<Game> searchAllGames() {
+		return gameRepository.findAll();
+	}
+
+Outra alternativa para isso, pode ser o código a seguir: 
+
+	@GetMapping
+	public ResponseEntity<?> searchAllGames() {
+		List<Game> gameList = gameRepository.findAll();
+		return gameList.isEmpty() ? ResponseEntity.noContent().build() : ResponseEntity.ok(gameList);
+	}
+	
+Nesse caso, o ResponseEntity<?> funciona como uma entidade de resposta de um tipo a se definir.
+Com esse retorno, é possível retornar algo do tipo:
+	return ResponseEntity.ok(categorias) -> retornaria uma lista de categorias
+	return ResponseEntity.notFound().build() -> retornaria um status code 404. O build() serve para gerar o ResponseEntity
+	
+Retornar um 404 não é muito bom pois às vezes a URL mudou e não necessariamente não existem resultados. O ideal seria retornar
+um erro 204
+
+ou seja, se estiver vazia, retorna um 204 - No Content. Caso esteja com conteúdo, retorna a lista
+
+Podemos também retornar somente o objeto de ID escolhido pelo usuário. Nesse caso, o código ficaria desse jeito: 
+
+	@GetMapping("/{id}")
+	public Game searchGameById(@PathVariable Long id) {
+		return gameRepository.findOne(id);
+	}
+
+Para isso, o GetMapping deverá receber, em sua URI, o ID do objeto criado e o retornará através do método findOne(id).
+
+No caso de salvar, por exemplo, como ela precisa salvar um objeto inteiro e
+não somente atributos separados, a anotação @RequestBody Game game atribui os
+valores passados pelo método Post para o objeto do tipo Game. Já o HttpServletResponse
+atribui uma resposta para o retorno do método. Pegando o exemplo a seguir:
+
+	@PostMapping
+	@ResponseStatus(HttpStatus.CREATED)
+	public void saveNewGame(@RequestBody Game game, HttpServletResponse response) {
+		Game savedGame = gameRepository.save(game);
+		
+		URI uri = ServletUriComponentsBuilder.fromCurrentRequestUri().path("/{code}").buildAndExpand(savedGame.getId()).toUri();
+		response.setHeader("Location", uri.toASCIIString());
+	}
+	
+Ja podemos ver que o ResponseStatus retornará a resposta se o objeto foi ou
+não foi criado (no caso, retornará um 201 Created já que o HttpStatus.CREATED
+foi adicionado, ao invés do padrão 200 OK de resposta de servidores). Já
+dentro do código, ele salvará a URI na variável uri, e enviará através do observador "Location",
+com a variável do tipo HttpServletResponse chamada response que foi recebda, 
+o código que este componente for salvo. Digamos que ele seja salvo com o id 5.
+Ao executar o POST, será mostrado ao lado da informação "Location" a URL completa
+com a URI contendo o número do id do game salvo, no caso 5. Esse tipo de código
+pode ser usado para fazer um redirect também.
+
+Da pra retornar também o objeto salva no caso. Faz-se da seguinte forma:
+
+	@PostMapping
+	public ResponseEntity<Game> saveNewGame(@RequestBody Game game, HttpServletResponse response) {
+		Game savedGame = gameRepository.save(game);
+		
+		URI uri = ServletUriComponentsBuilder.fromCurrentRequestUri().path("/{code}").buildAndExpand(savedGame.getId()).toUri();
+		response.setHeader("Location", uri.toASCIIString());
+		
+		return ResponseEntity.created(uri).body(savedGame);
+	}
+	
+Nesse caso, ele retorna exatamente o conteúdo que foi enviado, como se estivesse
+fazendo um GET.
+
+Para deletar um dado do banco, podemos utilizar a annotation @DeleteMapping:
+
+	@DeleteMapping("/{id}")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void deleteGameById(@PathVariable Long id) {
+		gameRepository.delete(id);
+	}
+	
+Nesse código, ele simplesmente vai remover do banco o dado com o ID previsto na URI
+e, após deletar, ele retornará um No Content. Mas e se deletar um ID que já não
+existe mais? Ele retornará um erro 500, ja que o servidor não conseguiu deletar
+algo que não existe mais. É possível tratar em algo que já temos: o Exception Handler.
+Nesse exception handler, será necessário criar um método novo, pois não existe
+um método assim ainda. A criação ficará da seguinte forma: 
+
+	@ExceptionHandler({EmptyResultDataAccessException.class })
+	@ResponseStatus(HttpStatus.NOT_FOUND)
+	public void handleEmptyResultDataAccessException(RuntimeException ex) {
+		
+	}
+	
+Com a annotation @ExceptionHandler, podemos botar vários tipos de exceções dentro, que
+serão as exceções que o programa irá capturar e redirecionar ao método. Passando um 
+RuntimeException pois a exceção ocorreu em tempo de execução. Pode-se também
+adicionar um @ResponseStatus com um not found para informar que isso não foi 
+encontrado pois já não existe mais.
+
+Na atualização, a coisa é um pouco diferente. Para o REST, existe um request
+de http chamado PUT. Esse request consegue atualizar os dados, porém, todos os
+dados devem ser atualizados de uma vez. Isso significa que em um caso de uma
+entidade que possui nome e descrição, caso a descrição seja atualizada, o nome
+deve ser atualizado também. Para controlar essa requisição, ficaria algo
+mais ou menos da seguinte forma: 
+
+	@PutMapping("/{id}")
+	public ResponseEntity<Game> updateGameById(@PathVariable Long id, @Valid @RequestBody Game game) {
+		Game savedGame = gameRepository.findOne(id);
+		BeanUtils.copyProperties(game, savedGame, "id"));
+		gameRepository.save(savedGame);
+		
+		return ResponseEntity.ok(savedGame);
+	}
+	
+A annotation @PutMapping serve para mapear o request de PUT, com o id na URI.
+Depois, nos parâmetros, é recebido o id e o game com os valores atualizados.
+Para atualizar o game, o código então pega o jogo que já esta no db através
+do savedGame = gameRepository.findOne(id) e então utiliza do método do
+BeanUtils.copyProperties() copiando os dados atualizados do game para o 
+savedGame, ignorando o ID, que no caso não precisa ser salvo. Em seguida, salva
+novamente a nova entidade atualizada e retorna um ok. Mas e se tentar atualizar
+uma pessoa que não existe? Ele retornará um erro 500. Para resolver isso
+deve-se fazer da seguinte forma: 
+
+	if(savedGame == null) {
+			throw new EmptyResultDataAccessException(1);
+	}
+	
+Dessa forma, ele jogará um erro de recurso não encontrado ao invés de um
+erro de servidor.
+
+Pode-se também fazer uma atualização parcial com o PUT. No caso, queremos
+apenas atualizar o gênero ou a plataforma do game. Para organizar melhor, 
+criei um método searchGameById dentro do service, apenas para fazer esses
+trabalhos repetitivos: 
+
+	private Game searchGameById(Long id) {
+		Game savedGame = gameRepository.findOne(id);
+		
+		if (savedGame == null) {
+			throw new EmptyResultDataAccessException(1);
+		}
+		
+		return savedGame;
+	}
+	
+	public void updateGenre(Long id, String genre) {
+		Game savedGame = searchGameById(id);
+		
+		savedGame.setGenre(genre);
+		gameRepository.save(savedGame);
+	}
+	
+	public void updatePlataform(Long id, String plataform) {
+		Game savedGame = searchGameById(id);
+		
+		savedGame.setPlataform(plataform);
+		gameRepository.save(savedGame);
+	}
+	
+Basicamente, desse jeito, estaríamos fazendo um update de cada atributo.
+Dentro do resource, teremos que criar um método para atualizar cada recurso
+único, com sua respectiva URI:
+
+	@PutMapping("/{id}/genre")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void updateGenre(@PathVariable Long id, @RequestBody String genre) {
+		gameService.updateGenre(id, genre);
+	}
+	
+	@PutMapping("/{id}/plataform")
+	@ResponseStatus(HttpStatus.NO_CONTENT)
+	public void updatePlataform(@PathVariable Long id, @RequestBody String plataform) {
+		gameService.updatePlataform(id, plataform);
+	}
+	
+Visto que podemos pegar uma causa conehcida, é interessante atualizar o método
+de capturar a causa no nosso GamingDBExceptionHandler dentro de 
+handleHttpMessageNotReadable:
+
+	String developerMessage = ex.getCause() != null ? ex.getCause().toString() : ex.toString();
+	
+

@@ -1,0 +1,51 @@
+No arquivo application.properties, temos as propriedades da aplicação, como por exemplo a conexão com o banco de dados, dentre outras propriedades que
+julga importante para o funcionamento desta.
+
+spring.jpa.database=MYSQL
+spring.datasource.url=jdbc:mysql://localhost/gamingdb?createDatabaseIfNotExist=true&useSSL=false
+spring.datasource.username=rokusho
+spring.datasource.password=root
+
+spring.jpa.show-sql=true
+
+O código acima define uma database que será implementada na aplicação. Para isso, é necessário que o pom.xml também esteja atualizado com a versão dos
+jar's que se usará, para que puxe do Maven. Para uma implementação de database, o pom.xml da aplicação deverá incluir os seguintes códigos dentro da tag
+<dependencies>:
+
+		<!-- mysql -->
+		<dependency>
+			<groupId>mysql</groupId>
+			<artifactId>mysql-connector-java</artifactId>
+			<scope>compile</scope>
+		</dependency>
+		
+		<!-- Migrações Flyway -->
+		<dependency>
+			<groupId>org.flywaydb</groupId>
+			<artifactId>flyway-core</artifactId>
+		</dependency>
+		
+Como de costume, o <!-- --> serve para criar comentários. A tag <dependency> serve para citar a dependência. Para adicionar o MySQL e o FlywayDB (um componente
+para migração de dados e versionamento das databases), temos a tag groupId com o nome do componente, o artifactId para identificar o componente em .jar e o 
+escopo que o componente irá rodar. No caso do banco de dados, ele irá rodar no escopo de compilação.
+
+
+No código utilizado na application.properties, temos algumas variáveis. A primeira delas, a "spring.jpa.database" diz respeito ao tipo de banco que iremos
+usar na aplicação Spring. No caso, o valor está setado como MYSQL.
+A variável "spring.datasource.url" diz respeito à URL do seu banco de dados. No caso, dentro da url o comando "gamingdb?createDatabaseIfNotExist=true" fará
+com que caso a database gamingdb seja escolhida mas não tenha sido criada, ele automaticamente criará a database.
+"spring.datasource.username" será o nome de usuário que será usado para conectar à sua database. A variável seguinte, "spring.datasource.password" corresponde
+à senha.
+Por último, a variável "spring.jpa.show-sql" definirá se o log do spring apresentará informações sobre o banco de dados.
+
+Por comportamento padrão, a aplicação permite com que o usuário possa cadastrar valores inválidos no DB. Por exemplo, é possível gravar uma idade
+para um personagem mesmo que a tabela nem ao menos tenha esse atributo. Para impedir esse comportamento, pode-se adicionar a seguinte 
+propriedade no application.properties: 
+	
+	spring.jackson.deserialization.fail-on-unknown-properties=true
+	
+Jackson é a biblioteca que converte JSON em Java e vice versa. Com esse atributo, o jackson faz a deserialization, ou seja, pega a String do JSON e o leva
+para um ojeto java. Fail-on-unknown-properties faz com que a deserialização falhe caso haja propriedades desconhecidas, causando uma falha de gravação. Isso fará
+com que a aplicação envie um Bad Request.
+
+Outro grande atributo para esse arquivo é o spring.jackson.date-format=yyyy-MM-dd. Esse atributo muda a apresentação da data.

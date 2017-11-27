@@ -1,0 +1,586 @@
+Para adicionar uma segurança básica no app, é preciso colocar no pom.xml a seguinte dependência:
+
+	<dependency>
+		<groupId>org.springframework.boot</groupId>
+		<artifactId>spring-boot-starter-security</artifactId>
+	</dependency>
+	
+Para adicionar o http basic e usuário e senha, é necessário customizar a dependencia criando uma 
+classe chamada SecurityConfig:
+
+	package com.example.gamingdb.api.config;
+	
+	import org.springframework.context.annotation.Configuration;
+	import org.springframework.security.config.annotation.authentication.builders.AuthenticationManagerBuilder;
+	import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+	import org.springframework.security.config.annotation.web.configuration.WebSecurityConfigurerAdapter;
+	
+	@Configuration
+	@EnableWebSecurity
+	public class SecurityConfig extends WebSecurityConfigurerAdapter{
+	
+		@Override
+		protected void configure(AuthenticationManagerBuilder auth) throws Exception {
+			auth.inMemoryAuthentication().withUser("admin").password("admin").roles("ROLE");
+		}
+	}
+	
+Nesse código, a autenticação acontece em memória e não no banco de dados, com o usuário admin e senha
+admin. 
+
+	@Override
+	protected void configure(HttpSecurity http) throws Exception {
+		http.authorizeRequests().anyRequest().authenticated();
+	}
+	
+Esse método fecha todas as requisições, para que nenhuma fique aberta. Para deixar requisições abertas,
+seria necessário fazer da seguinte forma:
+
+	@Override
+	protected void configure(HttpSecurity http) throws Exception {
+		http.authorizeRequests().antMatchers("/pokemons").permitAll()
+			.anyRequest().authenticated()
+			.and().httpBasic()
+			.and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+			.and().csrf().disable();
+	}
+	
+Dessa forma, qualquer requisição de games é aceita, mas somente dessa URL, as outras serão negadas, pois
+precisam estar logadas. Utilizando o httpBasic() quer dizer que a segurança da aplicação é http e não
+https (o que é ruim, mas será melhorado mais pra frente). Com o ssessionManagement, tiramos os estados
+das sessões (STATELESS) e o csrf desabilita injections de javascript, já que por hora utilizamos só
+JSON.
+
+A codificação do http não é dificil pegar, é só interceptar a requisição e pegar o código Basic
+que é mostrado, e então chegamos no usuário e senha. Mas com o https, o código Basic fica escondido e
+ninguém conseguirá pegar a informação. Antes de começar a codificar a nova segurança, vamos entender
+umas coisas.
+
+O OAuth 2 é um framework de autorização, que limita o acesso à aplicação utilizando o http (como fazemos
+quando permitimos que x site acesse suas informações no facebook). Se um site tentar acessar suas fotos
+no facebook, temos 2 caminhos: ou fazemos um upload no site, ou o site busca suas fotos no seu face. Mas
+suas fotos só são acessadas para quem está logado, seus amigos ou as pessoas que você deseja que vejam
+suas fotos. Para o site buscar suas fotos, existem dois meios: Ou você dá o seu usuário e senha para o 
+site, com problemas óbvios nessa opção (rsrs) ou o site utiliza do OAuth. Com o OAuth, o site requer
+sua autorização para acessar suas fotos sem que seu usuário e senha sejam expostos, através de um 
+redirecionamento e mostrando o botão que o facebook exibe sobre permissões de sites ou apps. 
+Basicamente o OAuth deixa terceiros acessarem algumas informações sem acessos estranhos. No OAuth 2, 
+existem vários fluxos para desenvolver apps para Desk, Web e até Smartphones. O fluxo que usaremos
+será o PasswordFlow (ou ResourceOwnerPasswordFlow). Existem 4 elementos principais que precisamos 
+entender quando trabalhamos com o OAuth:
+	- User - o dono do recurso, ou o ResourceOwner. No exemplo do facebook, seria o usuário final, ou
+	seja, quem tem o user e password;
+	- Client - a aplicação que roda no celular, no desk, no browser, etc (no caso, quem queria acessar
+	suas fotos). User e Client não são a mesma coisa;
+	- Authorization Server - servidor que controla as autorizações;
+	- Resource Server - servidor com os recursos (no caso anterior, as fotos).
+	
+No nosso caso, o Authorization Server e o Resource Server estão na mesma máquina (a nossa), mas em grandes
+empresas, os servidores estão em máquinas separadas. No caso, o Client precisa acessar o Resource Server
+mas antes, precisa da autorização do Authorization Server, pedindo um token, para acessar o resource.
+Caso o cliente tente acessar o Resource sem o token, será negado. Pedindo o token, o Authorization Server
+retorna um token para o client (com o usuário permitindo, informando pro usuário e senha). Após isso, 
+a cada request no Resource Server, o token será passado para conseguir acessar os recursos do servidor.
+Para cada fluxo, existem diferenças, e esse é apenas o fluxo básico. O token é uma grande String que
+contém um código de autorização, como se fosse uma senha, permitida para acessar os recursos.
+
+Para trabalhar com o OAuth 2, precisamos adicionar uma dependência no pom.xml:
+
+	<!-- Segurança OAuth -->
+	<dependency>
+		<groupId>org.springframework.security.oauth</groupId>
+		<artifactId>spring-security-oauth2</artifactId>
+	</dependency>
+	
+E então, vamos fazer algumas alterações em SecurityConfig. Primeiro, mudar o nome para ResourceServerConfig:
+
+	@Configuration
+	@EnableWebSecurity
+	@EnableResourceServer
+	public class ResourceServerConfig extends ResourceServerConfigurerAdapter{
+	
+		@Autowired
+		public void configure(AuthenticationManagerBuilder auth) throws Exception {
+			auth.inMemoryAuthentication().withUser("admin").password("admin").roles("ROLE");
+		}
+		
+		@Override
+		public void configure(HttpSecurity http) throws Exception {
+			http.authorizeRequests().antMatchers("/pokemons").permitAll()
+				.anyRequest().authenticated()
+				.and().httpBasic()
+				.and().sessionManagement().sessionCreationPolicy(SessionCreationPolicy.STATELESS)
+				.and().csrf().disable();
+		}
+	}
+	
+E então, para construir essa classe, mudamos algumas coisas. Isso cuidará do servidor
+de serviços, portanto deverá ter a anotação @EnableResourceServer, e estenderá o
+ResourceServerConfigurerAdapter. Por conta disso, tiraremos o primeiro override e 
+colocaremos o @Autowired. Mudaremos ambos para public também. Outra classe será
+criada, a AuthorzationServerConfig:
+
+	package com.example.gamingdb.api.config;
+
+	import org.springframework.beans.factory.annotation.Autowired;
+	import org.springframework.context.annotation.Bean;
+	import org.springframework.context.annotation.Configuration;
+	import org.springframework.security.authentication.AuthenticationManager;
+	import org.springframework.security.oauth2.config.annotation.configurers.ClientDetailsServiceConfigurer;
+	import org.springframework.security.oauth2.config.annotation.web.configuration.AuthorizationServerConfigurerAdapter;
+	import org.springframework.security.oauth2.config.annotation.web.configuration.EnableAuthorizationServer;
+	import org.springframework.security.oauth2.config.annotation.web.configurers.AuthorizationServerEndpointsConfigurer;
+	import org.springframework.security.oauth2.provider.token.TokenStore;
+	import org.springframework.security.oauth2.provider.token.store.InMemoryTokenStore;
+	
+	@Configuration
+	@EnableAuthorizationServer
+	public class AuthorizationServerConfig extends AuthorizationServerConfigurerAdapter{
+	
+		@Autowired
+		private AuthenticationManager authenticationManager;
+		
+		@Override
+		public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+			clients.inMemory().withClient("angular").secret("@ngul@r0")
+			   .scopes("read", "write").authorizedGrantTypes("password")
+			   .accessTokenValiditySeconds(1800);
+		}
+		
+		@Override
+		public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+			endpoints.tokenStore(tokenStore()).authenticationManager(authenticationManager);
+		}
+		
+		@Bean
+		public TokenStore tokenStore() {
+			return new InMemoryTokenStore();
+		}
+	}
+	
+Essa classe possui métodos para validar o token e o cliente. O authenticationManager quem vai
+gerenciar a aplicação, pegando usuário e senha. O primeiro configure faz a configuração da 
+aplicação, autorizando o cliente a acessar o servidor, guardando-o em memória. Pode-se configurar
+um banco de dados para gravar clientes, mas por hora, vamos usar em memória. Assim, usamos o nome
+angular com a senha do cliente sendo @ngul@r0. O escopo do cliente é uma string, para definir o
+que o cliente pode acessar, limitando seu acesso. Com o authorizedGrantTypes, definimos o flow,
+no caso o PasswordFlow, recebendo usuário e senha e enviar para conseguir o access token. Por
+último, temos quantos segundos o token ficará ativo (no caso, 30 min). Depois, temos outro 
+configure que configurará onde o token será armazenado. No caso, estaremos armazenando em um
+tokenStore (que armazena em memória) e então passaremos o gerenciador de autenticações 
+(authenticationManager). Como usaremos o jwt que não armazena o token, vamos deixar por hora
+em memória mesmo.
+
+Para testar o token no Postman, precisamos criar uma requisição do tipo Post para 
+localhost:8080/oauth/token. Nessa URL o access token será requisitado. Passaremos uma 
+autorização do tipo Basic Auth, passando usuário e senha do client (não do usuário). No corpo
+da requisição, trocaremos para x-www-form-urlencoded, informando vários parâmetros como:
+	client = angular
+	username = admin
+	password = admin
+	grant_type = password
+	
+Como usaremos o JWT, vamos explicar um pouco sobre. O JWT é o mais completo dos WebTokens. Ele
+serve para o mesmo propósito que os tokens, mas ao invés de a String ser curta, ela é maior e
+com mais informações. O JWT é dividido em Header, Payload e Signature. O payload é onde podemos
+adicionar informações como quisermos, mas com cuidado. Como o token é uma String, se o payload
+ficar imenso, e é uma coisa q vai trafegar muito, isso pode causar problemas. Para adicionar
+o JWT, devemos por outra dependência no pom.xml: 
+	
+	<!-- Token do JWT -->
+	<dependency>
+		<groupId>org.springframework.security</groupId>
+		<artifactId>spring-security-jwt</artifactId>
+	</dependency>
+	
+Faremos algumas modificações no AuthorizationServefrConfig. Adicionaremos um conversor de token
+no endpoint:
+
+	@Override
+	public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+		endpoints.tokenStore(tokenStore())
+				 .accessTokenConverter(accessTokenConverter())
+				 .authenticationManager(authenticationManager);
+	}
+	
+Ja criando o bean accessTokenConverter:
+
+	@Bean
+	public JwtAccessTokenConverter accessTokenConverter() {
+		JwtAccessTokenConverter accessTokenConverter = new JwtAccessTokenConverter();
+		accessTokenConverter.setSigningKey("gaming");
+		
+		return accessTokenConverter;
+	}
+
+Mudaremos também o tokenStore() :
+
+	@Bean
+	public TokenStore tokenStore() {
+		return new JwtTokenStore(accessTokenConverter());
+	}
+
+Para não ter que ficar pedindo usuário e senha o tempo todo, podemos fazer um refresh token.
+Por que não deixar com um tempo de vida maior? Porque ele é acessado pelo JS, sendo que ele
+possui muitas informações. É bom que ele tenha um tempo de vida curto, pois se alguém pegar 
+o token, nao vai conseguir fazer muita coisa. Se a pessoa pegar o refresh token, colocaremos
+em um cookie seguro dentro do https, ou seja, o JS não vai possuir acesso a esse cookie.
+Para pegar o refresh token, vamos continuar em AuthorizationServerConfig, alterando o método
+configure de ClientDetailsServiceConfigurer para abordar o refresh token:
+
+	@Override
+	public void configure(ClientDetailsServiceConfigurer clients) throws Exception {
+		clients.inMemory().withClient("angular").secret("@ngul@r0")
+		   .scopes("read", "write")
+		   .authorizedGrantTypes("password", "refresh_token")
+		   .accessTokenValiditySeconds(20)
+		   .refreshTokenValiditySeconds(3600 * 24);
+	}
+	
+Colocamos também um tempo maior para o refresh token, 1 dia inteiro. Agora alteraremos
+o endpoint: 
+
+	@Override
+	public void configure(AuthorizationServerEndpointsConfigurer endpoints) throws Exception {
+		endpoints.tokenStore(tokenStore())
+				 .accessTokenConverter(accessTokenConverter())
+				 .reuseRefreshTokens(false)
+				 .authenticationManager(authenticationManager);
+	}
+	
+Dessa forma, sempre que pedirmos um acesso, enviará um novo refresh token.
+
+Não é bom que o JavaScript tenha acesso direto ao RefreshToken. Ao access token beleza, mas
+o refresh token não é bom. Então colocaremos o Refresh Token em um cookie https. Para fazer
+isso, existe uma interface chamado ResponseBodyAdvice. Ele pega a requisição antes de ser 
+escrita de volta e podemos trabalhar em cima dela. Criaremos uma classe nova:
+
+	package com.example.gamingdb.api.token;
+
+	import org.springframework.core.MethodParameter;
+	import org.springframework.http.MediaType;
+	import org.springframework.http.converter.HttpMessageConverter;
+	import org.springframework.http.server.ServerHttpRequest;
+	import org.springframework.http.server.ServerHttpResponse;
+	import org.springframework.security.oauth2.common.OAuth2AccessToken;
+	import org.springframework.web.bind.annotation.ControllerAdvice;
+	import org.springframework.web.servlet.mvc.method.annotation.ResponseBodyAdvice;
+	
+	@ControllerAdvice
+	public class RefreshTkoenPostProcessor implements ResponseBodyAdvice<OAuth2AccessToken>{
+	
+		@Override
+		public OAuth2AccessToken beforeBodyWrite(OAuth2AccessToken arg0, MethodParameter arg1, MediaType arg2,
+				Class<? extends HttpMessageConverter<?>> arg3, ServerHttpRequest arg4, ServerHttpResponse arg5) {
+			// TODO Auto-generated method stub
+			return null;
+		}
+	
+		@Override
+		public boolean supports(MethodParameter arg0, Class<? extends HttpMessageConverter<?>> arg1) {
+			// TODO Auto-generated method stub
+			return false;
+		}
+	
+	}
+	
+Se quiséssemos interceptar outra coisa, um pokémon por exemplo, na parametrização de 
+ResponseBodyAdvice colocariamos o <Pokemon>. Assim, ele será interceptado quando estiver voltando.
+Dentro do método supports, deixaremos assim: 
+
+	@Override
+	public boolean supports(MethodParameter returnType, 
+							Class<? extends HttpMessageConverter<?>> converterType) {
+		return returnType.getMethod().getName().equals("postAccessToken");
+	}
+	
+Temos que fazer isso pois o objeto retorna em vários momentos, então conseguimos com o método
+executar um filtro, executando o segundo método beforeBodyWrite, quando o suporte retornar
+true. Isso acontece quando o nome do método é igual a "postAccessToken". Agora devemos
+asdicionar o método para adicionar o Token no cookie. Para isso, precisamos do request e do 
+response: 
+
+	@Override
+	public OAuth2AccessToken beforeBodyWrite(OAuth2AccessToken body, MethodParameter returnType, 
+											MediaType selectedContentType, 
+											Class<? extends HttpMessageConverter<?>> selectedConverterType, 
+											ServerHttpRequest request, ServerHttpResponse response) {
+		HttpServletRequest req = ((ServletServerHttpRequest) request).getServletRequest();
+		HttpServletResponse resp = ((ServletServerHttpResponse) response).getServletResponse();
+		
+		String refreshToken = body.getRefreshToken().getValue();
+		addRefreshTokenOnCookie(refreshToken, req, resp);
+		
+		return null;
+	}
+	
+Criando o método de "addRefreshTokenOnCookie()" temos algo assim :
+
+	private void addRefreshTokenOnCookie(String refreshToken, HttpServletRequest req, HttpServletResponse resp) {
+		Cookie refreshTokenCookie = new Cookie("refreshToken", refreshToken);
+		
+		refreshTokenCookie.setHttpOnly(true);
+		refreshTokenCookie.setSecure(false);
+		refreshTokenCookie.setPath(req.getContextPath() + "/oauth/token");
+		refreshTokenCookie.setMaxAge(2592000);
+		
+		resp.addCookie(refreshTokenCookie);
+	}
+	
+por hora, vamos deixar o cookie como false no https, e somente em http. Em produção,
+adicionaremos ele no https. Depois de adicionarmos, precisamos de um método para remover o 
+cookie dentro do beforeBodyWrite(): 
+
+	@Override
+	public OAuth2AccessToken beforeBodyWrite(OAuth2AccessToken body, MethodParameter returnType, 
+											MediaType selectedContentType, 
+											Class<? extends HttpMessageConverter<?>> selectedConverterType, 
+											ServerHttpRequest request, ServerHttpResponse response) {
+		HttpServletRequest req = ((ServletServerHttpRequest) request).getServletRequest();
+		HttpServletResponse resp = ((ServletServerHttpResponse) response).getServletResponse();
+		
+		DefaultOAuth2AccessToken token = (DefaultOAuth2AccessToken) body;
+		
+		String refreshToken = body.getRefreshToken().getValue();
+		addRefreshTokenOnCookie(refreshToken, req, resp);
+		removeRefreshTokenFromBody(token);
+		
+		return body;
+	}
+	
+Criando o método de remoção da seguinte forma: 
+
+	private void removeRefreshTokenFromBody(DefaultOAuth2AccessToken token) {
+		token.setRefreshToken(null);
+	}
+	
+Dessa forma podemos colocar, do corpo, o token no cookie e removê-lo do body, sendo um pouco mais difícil
+tirar alguma informação dele, já que não faz mais parte do corpo da página. Agora vamos tirar o
+token do cookie e adicioná-lo na requisição. Para isso, vamos criar a classe
+RefreshTokenCookiePreProcessorFilter:
+
+	package com.example.gamingdb.api.token;
+
+	import javax.servlet.Filter;
+	import javax.servlet.FilterChain;
+	import javax.servlet.FilterConfig;
+	import javax.servlet.ServletException;
+	import javax.servlet.ServletRequest;
+	import javax.servlet.ServletResponse;
+	
+	import org.springframework.core.Ordered;
+	import org.springframework.core.annotation.Order;
+	import org.springframework.stereotype.Component;
+	
+	@Component
+	@Order(Ordered.HIGHEST_PRECEDENCE)
+	public class RefreshTokenCookiePreProcessorFilter implements Filter{
+
+		@Override
+		public void destroy() {
+			// TODO Auto-generated method stub
+			
+		}
+	
+		@Override
+		public void doFilter(ServletRequest arg0, ServletResponse arg1, FilterChain arg2)
+				throws IOException, ServletException {
+			// TODO Auto-generated method stub
+			
+		}
+	
+		@Override
+		public void init(FilterConfig arg0) throws ServletException {
+			// TODO Auto-generated method stub
+			
+		}
+	
+	}
+	
+O @Order(Ordered.HIGHEST_PRECEDENCE) faz com que o filtro tenha uma prioridade muito alta, já
+que a requisição precisa ser analisado antes de todo mundo. Essa classe implementa um filtro
+comum do javax. Agora vamos alterar o método doFilter: 
+
+	@Override
+	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+			throws IOException, ServletException {
+		
+		HttpServletRequest req = (HttpServletRequest) request;
+		
+		if ("/oauth/token".equalsIgnoreCase(req.getRequestURI()) && 
+			"refresh_token".equals(req.getParameter("grant_type")) &&
+			req.getCookies() != null) {
+			for (Cookie cookie : req.getCookies()) {
+				if (cookie.getName().equals("refreshToken")) {
+					String refreshToken = cookie.getValue();
+				}
+			}
+		}
+	}
+	
+Dessa forma, se a URI for /oauth/token (URI de direcionamento para os tokens), o refresh_token
+for do tipo grant_type (tipo de permissão) e houver algum cookie, ele vai pegar o valor do token
+que está no cookie e armazenar em um refresh token. Isso é como um filtro que vai pegar aquele
+token dos cookies. Agora vamos adicionar o token na requisição, criando uma inner class chamada
+MyServletRequestWrapper
+
+	static class MyServletRequestWrapper extends HttpServletRequestWrapper {
+
+		private String refreshToken;
+		
+		public MyServletRequestWrapper(HttpServletRequest request, String refreshToken) {
+			super(request);
+			this.refreshToken = refreshToken;
+		}
+		
+	}
+	
+E agora vamos ajustar o método anterior para comportar nossa inner class:
+
+	@Override
+	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+			throws IOException, ServletException {
+		
+		HttpServletRequest req = (HttpServletRequest) request;
+		
+		if ("/oauth/token".equalsIgnoreCase(req.getRequestURI()) && 
+			"refresh_token".equals(req.getParameter("grant_type")) &&
+			req.getCookies() != null) {
+			for (Cookie cookie : req.getCookies()) {
+				if (cookie.getName().equals("refreshToken")) {
+					String refreshToken = cookie.getValue();
+					req = new MyServletRequestWrapper(req, refreshToken);
+				}
+			}
+		}
+	}
+	
+Agora, passaremos um novo ParameterMap em nossa inner class. Para isso, dentro de 
+MyServletRequestWrapper colocaremos um novo método: 
+
+	@Override
+	public Map<String, String[]> getParameterMap() {
+		ParameterMap<String, String[]> map = new ParameterMap<>(getRequest().getParameterMap());
+		map.put("refreshToken", new String[] { refreshToken });
+		map.setLocked(true);
+		
+		return map;
+	}
+	
+Assim, ele vai sempre utilizar do refreshToken pego para mapear os tokens nas requisições. Depois
+que tudo acontecer, devemos continuar a cadeia do filtro adicionando uma linha em nosso doFilter:
+
+	@Override
+	public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
+			throws IOException, ServletException {
+		
+		HttpServletRequest req = (HttpServletRequest) request;
+		
+		if ("/oauth/token".equalsIgnoreCase(req.getRequestURI()) && 
+			"refresh_token".equals(req.getParameter("grant_type")) &&
+			req.getCookies() != null) {
+			for (Cookie cookie : req.getCookies()) {
+				if (cookie.getName().equals("refreshToken")) {
+					String refreshToken = cookie.getValue();
+					req = new MyServletRequestWrapper(req, refreshToken);
+				}
+			}
+		}
+		
+		chain.doFilter(req, response);
+	}
+	
+Esses métodos todos servem para retirar o token da visão de algum script que pode tentar pegar
+as informações. Como setamos anteriormente a vida do token para 20 segundos, mesmo que o token
+seja capturado, ele não poderá ser utilizado. Já o refresh token será sempre atualizado e tem
+uma vida maior, para não ficar toda hora pedindo acesso. O refresh token nos garante uma 
+segurança maior, sendo enviada através do cookie, totalmente fora do body. O refresh token
+é um campo agora escondido e não interceptável.
+
+Uma coisa interessante é que a app do servidor tem uma proteção que só deixa o próprio domínio
+fazer requisições. Ou seja, se o protocolo, o domínio ou a porta trocarem, não vai deixar nenhum
+javascript fazer requisições. Existem exceções para isso, que são habilitadas través do CORS
+(Cross Origin HTTP Request). Habilitando o CORS, podemos fazer requisições em origens diferentes.
+basicamente podemos fazer gets, posts, através de arquivos JS de outras origens, ou outros 
+servidores. Para isso, em cada método anotaremos com @CrossOrigin, para permitir que o método
+seja acessado. Uma maneira de se autorizar todos os requests de um determinado servidor seria
+adicionando no seu main (GamingdbApiApplication dentro do primeiro pacote) o seguinte: 
+	
+	@Bean
+	public WebMvcConfigurer corsConfigurer() {
+		return new WebMvcConfigurerAdapter() {
+			@Override
+			public void addCorsMappings(CorsRegistry registry) {
+				registry.addMapping("/*").allowedOrigins("http://localhost:8000");
+			}
+		};
+	}
+	
+Infelizmente não utilizaremos o CORS com o spring, pois ele não está totalmente integrado com
+o OAuth 2, sempre bloqueando os access token. Se não houver alguma segurança, é algo interessante
+de se usar em seu projeto. Como no nosso caso estamos usando o OAuth 2, não usaremos dessas
+soluções. Podemos criar então um filtro para o cors. Para isso, faremos um CorsFilter:
+
+	package com.example.gamingdb.api.cors;
+
+	import java.io.IOException;
+	
+	import javax.servlet.Filter;
+	import javax.servlet.FilterChain;
+	import javax.servlet.FilterConfig;
+	import javax.servlet.ServletException;
+	import javax.servlet.ServletRequest;
+	import javax.servlet.ServletResponse;
+	import javax.servlet.http.HttpServletRequest;
+	import javax.servlet.http.HttpServletResponse;
+	
+	import org.springframework.core.Ordered;
+	import org.springframework.core.annotation.Order;
+	import org.springframework.stereotype.Component;
+	
+	@Component
+	@Order(Ordered.HIGHEST_PRECEDENCE)
+	public class CorsFilter implements Filter{
+	
+		private String permittedOrigin = "";
+		
+		@Override
+		public void doFilter(ServletRequest req, ServletResponse resp, FilterChain chain)
+				throws IOException, ServletException {
+			
+			HttpServletRequest request = (HttpServletRequest) req;
+			HttpServletResponse response = (HttpServletResponse) resp;
+			
+			response.setHeader("Acess-Control-Allow-Origin", permittedOrigin);
+			response.setHeader("Access-Control-Allow-Credentials", "true");
+			
+			if ("OPTIONS".equals(request.getMethod()) && permittedOrigin.equals(request.getHeader("Origin"))) {
+				response.setHeader("Access-Control-Allow-Methods", "POST, GET, DELETE, PUT, OPTIONS");
+				response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept");
+				response.setHeader("Access-Control-Allow-Max-Age", "3600");
+				
+				response.setStatus(HttpServletResponse.SC_OK);
+			} else {
+				chain.doFilter(req, resp);
+			}
+		}
+	
+		@Override
+		public void destroy() {
+			// TODO Auto-generated method stub
+			
+		}
+	
+		@Override
+		public void init(FilterConfig arg0) throws ServletException {
+			// TODO Auto-generated method stub
+			
+		}
+	
+	}
+	
+Dentro do método doFilter, faremos as permissões para o domínio que queremos, sempre verificando
+se a requisição veio de OPTIONS, ou seja, um dos requests do JS para realizar os outros requests.
+Basicamente é somente adicionar os headers de HTTP para permissão, para que o CORS funcione
+juntamente com o nosso OAuth 2. Caso o CORS tenha alguma atualização que funcione com o OAuth 2
+sem precisar desses códigos de filtro, podemos alterar para utilizar apenas annotations.

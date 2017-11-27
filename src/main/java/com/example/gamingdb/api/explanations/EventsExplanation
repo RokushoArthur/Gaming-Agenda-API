@@ -1,0 +1,97 @@
+Para evitar duplicação de código, o mais fácil é usar um evento. Esse recurso
+do Spring pode ser usado para várias coisas do sistema. Por exemplo, toda
+vez que quisermos adicionar o header "Location", dispara-se o evento de
+"Recurso criado". E assim, podemos espalhar o código em várias classes
+de resource. No caso abaixo, usaremos uma classe chamada CreatedResourceEvent,
+que estende a ApplicationEvent do spring:
+	
+	import org.springframework.context.ApplicationEvent;
+
+	public class CreatedResourceEvent extends ApplicationEvent {
+	
+		private static final long serialVersionUID = 1L;
+		
+		private HttpServletResponse response;
+		private Long id;
+	
+		
+		
+		public HttpServletResponse getResponse() {
+			return response;
+		}
+	
+		public void setResponse(HttpServletResponse response) {
+			this.response = response;
+		}
+	
+	
+	
+		public Long getId() {
+			return id;
+		}
+	
+	
+	
+		public void setId(Long id) {
+			this.id = id;
+		}
+	
+	
+	
+		public CreatedResourceEvent(Object source, HttpServletResponse response, Long id) {
+			super(source);
+			this.response = response;
+			this.id = id;
+		}
+		
+	}
+	
+Além disso, é necessário criar um ouvinte para o evento, que será representado
+pelo CreatedResourceListener, implementando ApplicationListener<CreatedResourceEvent>:
+
+	import java.net.URI;
+
+	import javax.servlet.http.HttpServletResponse;
+	
+	import org.springframework.context.ApplicationListener;
+	import org.springframework.web.servlet.support.ServletUriComponentsBuilder;
+	
+	import com.example.gamingdb.api.event.CreatedResourceEvent;
+	
+	public class CreatedResourceListener implements ApplicationListener<CreatedResourceEvent>{
+
+		@Override
+		public void onApplicationEvent(CreatedResourceEvent event) {
+			HttpServletResponse response = event.getResponse();
+			Long id = event.getId();
+			
+			addHeaderLocation(response, id);
+		}
+	
+		private void addHeaderLocation(HttpServletResponse response, Long id) {
+			URI uri = ServletUriComponentsBuilder.fromCurrentRequestUri().path("/{code}").buildAndExpand(id).toUri();
+			response.setHeader("Location", uri.toASCIIString());
+		}
+	
+	}
+	
+Agora, com esse código, pode-se reusar em outras classes resource da seguinte forma: 
+
+	@PostMapping
+	public ResponseEntity<Game> saveNewGame(@Valid @RequestBody Game game, HttpServletResponse response) {
+		Game savedGame = gameRepository.save(game);
+		
+		publisher.publishEvent(new CreatedResourceEvent(this, response, savedGame.getId()));
+		
+		return ResponseEntity.status(HttpStatus.CREATED).body(savedGame);
+	}
+	
+Declarando a variável publisher da seguinte forma: 
+
+	@Autowired
+	private ApplicationEventPublisher publisher;
+	
+Esse código basicamente diz que um publicador de eventos (no caso o publisher) vai tirar do nosso evento criado (CreatedResourceEvent) o seu método
+que é ouvido pelo listener. Os parâmetros passados pelo publicador de eventos são: "this" que simboliza a classe que está chamando o método, response
+para retornar o status da requisição (se deu ok, se deu bad request) e o código de identificação, no caso o id, que dentro do listener vai construir
+a URI.

@@ -1,0 +1,31 @@
+Flyway é um componente de migração de dados e versionamento. Basicamente com ele, não precisamos ficar alterando o banco de dados o tempo todo com comandos
+SQL do banco mesmo. Com o flyway, é só criar uma pasta chamada db e outra dentro chamada migration, dentro da categoria "src/main/resources".
+
+O Flyway só precisa que os arquivos de extensão .sql tenham o nome da versão seguido de 2 underlines. O resto do nome fica a critério seu, mas os espaçamentos
+devem ser substituídos por underlines. Ex:
+
+	V01__create_and_register_games.sql
+	V02__blablabla.sql
+	
+A única regra que o flyway segue é do número da versão com os 2 underlines seguintes, e o local do arquivo, que deve estar dentro de db/migration (que também
+deve estar dentro de src/main/resources). Cada versão é concretizada na próxima compilação do programa, por exemplo, a V01 será executada na primeira compilação,
+a V02 na segunda, e assim vai. Não tem como alterar uma tabela em uma versão que já foi executada, ou seja, se você está na 3° compilação, os arquivos V01 e V02
+se alterados, não farão efeito. Caso seja necessário alterar uma table, dropar ou qualquer coisa do tipo, que seja feita na próxima versão do seu arquivo (uma V03
+por exemplo, ou você pode dropar o schema do db inteirinho, fica a seu critério =] )
+
+Para que o hibernate consiga identificar as datas do SQL e traduzir para o local date do java, é necessário adicionar a seguinte dependência no pom.xml da sua
+aplicação: 
+	
+	<!-- Hibernate Java 8 Support -->
+	<dependency>
+		<groupId>org.hibernate</groupId>
+		<artifactId>hibernate-java8</artifactId>
+	</dependency>
+
+Mesma coisa para o Jackson:
+
+	<!-- Suporte do Jackson para as datas do Java 8 -->
+	<dependency>
+		<groupId>com.fasterxml.jackson.datatype</groupId>
+		<artifactId>jackson-datatype-jsr310</artifactId>
+	</dependency>

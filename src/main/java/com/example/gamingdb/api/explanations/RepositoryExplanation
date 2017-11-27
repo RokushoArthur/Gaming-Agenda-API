@@ -1,0 +1,6 @@
+Ao criar um repository, necessita-se estender o JpaRepository. Caso não seja feito, as técnicas de extração de dados, adição e manutenção terão de ser feitas
+manualmente, em comandos SQL. O JpaRepository ja traz métodos para mexer com o banco de dados como por exemplo o findAll() que traz todos daquela categoria, 
+ou o save() que adiciona ao DB, sendo que só é necessário colocar qual classe será trabalhada, e como será sua chave primária, no nome da interface:
+
+public interface ExemploRepositorio extends JpaRepository<nome_da_classe, tipo_da_chave_primaria> {}
+

@@ -1,0 +1,2 @@
+Anteriormente, fizemos um usuário e senha para serem gravaos na memória. Agora é hora de migrarmos
+essas informações para o DB. Vamos começar por fazer uma nova migração no Flyway
